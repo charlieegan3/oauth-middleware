@@ -13,18 +13,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/coreos/go-oidc"
 	"golang.org/x/oauth2"
 )
 
 type OAuth2Connector interface {
-	Exchange(ctx context.Context, code string) (*oauth2.Token, error)
-	AuthCodeURL(state string) string
+	Exchange(ctx context.Context, code string, opts ...oauth2.AuthCodeOption) (*oauth2.Token, error)
+	AuthCodeURL(state string, opts ...oauth2.AuthCodeOption) string
 	TokenSource(ctx context.Context, t *oauth2.Token) oauth2.TokenSource
 }
 
 type IDTokenVerifier interface {
-	Verify(r *http.Request, token string) (*oidc.IDToken, error)
+	Verify(ctx context.Context, rawIDToken string) (*oidc.IDToken, error)
 }
 
 type IDTokenValidator func(token *oidc.IDToken) bool
@@ -48,9 +48,7 @@ type MiddlewareAuthConfig struct {
 	BeginParam string
 }
 
-func InitMiddlewareAuth(
-	cfg *MiddlewareAuthConfig,
-) func(http.Handler) http.Handler {
+func InitMiddlewareAuth(cfg *MiddlewareAuthConfig) func(http.Handler) http.Handler {
 	basePath := cfg.BasePath
 	if basePath == "" {
 		basePath = "/"
@@ -58,6 +56,12 @@ func InitMiddlewareAuth(
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.HasPrefix(r.URL.Path, basePath) {
+				next.ServeHTTP(w, r)
+
+				return
+			}
+
 			if r.URL.Path == filepath.Join(basePath, "auth/callback") {
 				handleAuthCallback(w, r, cfg.OAuth2Connector, cfg.IDTokenVerifier, basePath, cfg.Validators)
 
@@ -176,7 +180,7 @@ func checkToken(
 	tokenValue string,
 	validators []IDTokenValidator,
 ) (bool, error) {
-	idToken, err := idTokenVerifier.Verify(r, tokenValue)
+	idToken, err := idTokenVerifier.Verify(r.Context(), tokenValue)
 	if err != nil {
 		return false, fmt.Errorf("failed to verify id token: %w", err)
 	}

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/coreos/go-oidc"
 	"golang.org/x/oauth2"
 )
 
@@ -19,7 +19,11 @@ type mockOAuth2Connector struct {
 	tokenSource oauth2.TokenSource
 }
 
-func (*mockOAuth2Connector) Exchange(_ context.Context, _ string) (*oauth2.Token, error) {
+func (*mockOAuth2Connector) Exchange(
+	_ context.Context,
+	_ string,
+	_ ...oauth2.AuthCodeOption,
+) (*oauth2.Token, error) {
 	t := &oauth2.Token{}
 
 	t = t.WithExtra(map[string]interface{}{
@@ -29,7 +33,7 @@ func (*mockOAuth2Connector) Exchange(_ context.Context, _ string) (*oauth2.Token
 	return t, nil
 }
 
-func (*mockOAuth2Connector) AuthCodeURL(_ string) string {
+func (*mockOAuth2Connector) AuthCodeURL(_ string, _ ...oauth2.AuthCodeOption) string {
 	return "http://example.com/auth"
 }
 
@@ -55,7 +59,7 @@ type matchingTokenVerifier struct {
 	match string
 }
 
-func (v *matchingTokenVerifier) Verify(_ *http.Request, token string) (*oidc.IDToken, error) {
+func (v *matchingTokenVerifier) Verify(_ context.Context, token string) (*oidc.IDToken, error) {
 	if token != v.match {
 		return nil, errors.New("invalid token")
 	}
@@ -285,5 +289,33 @@ func TestCallback(t *testing.T) {
 
 	if resp.Header().Get("Set-Cookie") == "" {
 		t.Fatalf("Expected a cookie to be set, got none")
+	}
+}
+
+func TestUnrelatedPath(t *testing.T) {
+	t.Parallel()
+
+	handler := InitMiddlewareAuth(&MiddlewareAuthConfig{
+		OAuth2Connector: &mockOAuth2Connector{
+			tokenSource: &mockTokenSource{},
+		},
+		IDTokenVerifier: &matchingTokenVerifier{},
+		BasePath:        "/admin",
+		BeginParam:      "notused",
+		Validators:      []IDTokenValidator{},
+	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/foo", nil)
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("Expected status code %d, got %d", http.StatusOK, resp.Code)
 	}
 }
