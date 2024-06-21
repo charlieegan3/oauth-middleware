@@ -13,7 +13,7 @@ import (
 	"golang.org/x/oauth2"
 	"gopkg.in/yaml.v3"
 
-	middlewares "github.com/charlieegan3/oauth-middleware/pkg/oauth"
+	"github.com/charlieegan3/oauth-middleware/pkg/oauthmiddleware"
 )
 
 type Config struct {
@@ -62,10 +62,10 @@ func main() {
 
 	tokenVerifier := oidcProvider.Verifier(&oidc.Config{ClientID: oauth2Config.ClientID})
 
-	mwCfg := &middlewares.MiddlewareAuthConfig{
+	mwCfg := &oauthmiddleware.Config{
 		OAuth2Connector: oauth2Config,
 		IDTokenVerifier: tokenVerifier,
-		Validators:      []middlewares.IDTokenValidator{},
+		Validators:      []oauthmiddleware.IDTokenValidator{},
 		BasePath:        c.BasePath,
 		BeginParam:      c.BeginParam,
 	}
@@ -74,7 +74,7 @@ func main() {
 
 	mux.HandleFunc("/", echo)
 
-	mw := middlewares.InitMiddlewareAuth(mwCfg)
+	mw := oauthmiddleware.Init(mwCfg)
 
 	srv := &http.Server{
 		Addr:              serverHost,

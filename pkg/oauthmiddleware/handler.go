@@ -1,54 +1,19 @@
-package middlewares
+package oauthmiddleware
 
 import (
-	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/coreos/go-oidc"
 	"golang.org/x/oauth2"
 )
 
-type OAuth2Connector interface {
-	Exchange(ctx context.Context, code string, opts ...oauth2.AuthCodeOption) (*oauth2.Token, error)
-	AuthCodeURL(state string, opts ...oauth2.AuthCodeOption) string
-	TokenSource(ctx context.Context, t *oauth2.Token) oauth2.TokenSource
-}
-
-type IDTokenVerifier interface {
-	Verify(ctx context.Context, rawIDToken string) (*oidc.IDToken, error)
-}
-
-type IDTokenValidator func(token *oidc.IDToken) bool
-
-func validateIDToken(token *oidc.IDToken, validators ...IDTokenValidator) bool {
-	for _, validator := range validators {
-		if !validator(token) {
-			return false
-		}
-	}
-
-	return true
-}
-
-type MiddlewareAuthConfig struct {
-	OAuth2Connector OAuth2Connector
-	IDTokenVerifier IDTokenVerifier
-	Validators      []IDTokenValidator
-
-	BasePath   string
-	BeginParam string
-}
-
-func InitMiddlewareAuth(cfg *MiddlewareAuthConfig) func(http.Handler) http.Handler {
+func Init(cfg *Config) func(http.Handler) http.Handler {
 	basePath := cfg.BasePath
 	if basePath == "" {
 		basePath = "/"
@@ -144,52 +109,6 @@ func handleToken(
 	}
 
 	return true
-}
-
-type state struct {
-	Destination string `json:"destination"`
-	Token       string `json:"token"`
-}
-
-func generateStateToken() (string, error) {
-	b := make([]byte, 32)
-
-	_, err := rand.Read(b)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate state token: %w", err)
-	}
-
-	return base64.RawURLEncoding.EncodeToString(b), nil
-}
-
-func setCookie(w http.ResponseWriter, name, value, path string, expiry time.Time) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     name,
-		Value:    value,
-		Secure:   true,
-		SameSite: http.SameSiteDefaultMode,
-		Path:     path,
-		HttpOnly: true,
-		Expires:  expiry,
-	})
-}
-
-func checkToken(
-	r *http.Request,
-	idTokenVerifier IDTokenVerifier,
-	tokenValue string,
-	validators []IDTokenValidator,
-) (bool, error) {
-	idToken, err := idTokenVerifier.Verify(r.Context(), tokenValue)
-	if err != nil {
-		return false, fmt.Errorf("failed to verify id token: %w", err)
-	}
-
-	if !validateIDToken(idToken, validators...) {
-		return false, nil
-	}
-
-	return true, nil
 }
 
 func handleAuthCallback(

@@ -1,4 +1,4 @@
-package middlewares
+package oauthmiddleware
 
 import (
 	"context"
@@ -74,7 +74,7 @@ func allowAllTokenValidator(_ *oidc.IDToken) bool {
 func TestBeginParam(t *testing.T) {
 	t.Parallel()
 
-	handler := InitMiddlewareAuth(&MiddlewareAuthConfig{
+	handler := Init(&Config{
 		OAuth2Connector: &mockOAuth2Connector{
 			tokenSource: &mockTokenSource{},
 		},
@@ -113,7 +113,7 @@ func TestBeginParam(t *testing.T) {
 func TestValidToken(t *testing.T) {
 	t.Parallel()
 
-	handler := InitMiddlewareAuth(&MiddlewareAuthConfig{
+	handler := Init(&Config{
 		OAuth2Connector: &mockOAuth2Connector{
 			tokenSource: &mockTokenSource{},
 		},
@@ -142,7 +142,7 @@ func TestValidToken(t *testing.T) {
 func TestInvalidToken(t *testing.T) {
 	t.Parallel()
 
-	handler := InitMiddlewareAuth(&MiddlewareAuthConfig{
+	handler := Init(&Config{
 		OAuth2Connector: &mockOAuth2Connector{
 			tokenSource: &mockTokenSource{},
 		},
@@ -171,7 +171,7 @@ func TestInvalidToken(t *testing.T) {
 func TestRefreshToken(t *testing.T) {
 	t.Parallel()
 
-	handler := InitMiddlewareAuth(&MiddlewareAuthConfig{
+	handler := Init(&Config{
 		OAuth2Connector: &mockOAuth2Connector{
 			tokenSource: &mockTokenSource{},
 		},
@@ -205,7 +205,7 @@ func TestRefreshToken(t *testing.T) {
 func TestExpiredTokenAndRefresh(t *testing.T) {
 	t.Parallel()
 
-	handler := InitMiddlewareAuth(&MiddlewareAuthConfig{
+	handler := Init(&Config{
 		OAuth2Connector: &mockOAuth2Connector{
 			tokenSource: &mockTokenSource{
 				returnError: "refresh expired",
@@ -248,7 +248,7 @@ func TestExpiredTokenAndRefresh(t *testing.T) {
 func TestCallback(t *testing.T) {
 	t.Parallel()
 
-	handler := InitMiddlewareAuth(&MiddlewareAuthConfig{
+	handler := Init(&Config{
 		OAuth2Connector: &mockOAuth2Connector{
 			tokenSource: &mockTokenSource{},
 		},
@@ -295,7 +295,7 @@ func TestCallback(t *testing.T) {
 func TestUnrelatedPath(t *testing.T) {
 	t.Parallel()
 
-	handler := InitMiddlewareAuth(&MiddlewareAuthConfig{
+	handler := Init(&Config{
 		OAuth2Connector: &mockOAuth2Connector{
 			tokenSource: &mockTokenSource{},
 		},
