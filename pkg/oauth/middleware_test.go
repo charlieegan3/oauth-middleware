@@ -2,6 +2,8 @@ package middlewares
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,14 +15,18 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// Mock implementations and test setup
-
 type mockOAuth2Connector struct {
 	tokenSource oauth2.TokenSource
 }
 
 func (*mockOAuth2Connector) Exchange(_ context.Context, _ string) (*oauth2.Token, error) {
-	return &oauth2.Token{}, nil
+	t := &oauth2.Token{}
+
+	t = t.WithExtra(map[string]interface{}{
+		"id_token": "valid-token",
+	})
+
+	return t, nil
 }
 
 func (*mockOAuth2Connector) AuthCodeURL(_ string) string {
@@ -64,15 +70,15 @@ func allowAllTokenValidator(_ *oidc.IDToken) bool {
 func TestBeginParam(t *testing.T) {
 	t.Parallel()
 
-	handler := InitMiddlewareAuth(
-		&mockOAuth2Connector{
+	handler := InitMiddlewareAuth(&MiddlewareAuthConfig{
+		OAuth2Connector: &mockOAuth2Connector{
 			tokenSource: &mockTokenSource{},
 		},
-		&matchingTokenVerifier{},
-		"/base",
-		"secret",
-		[]IDTokenValidator{allowAllTokenValidator},
-	)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		IDTokenVerifier: &matchingTokenVerifier{},
+		BasePath:        "/base",
+		BeginParam:      "secret",
+		Validators:      []IDTokenValidator{allowAllTokenValidator},
+	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -87,13 +93,12 @@ func TestBeginParam(t *testing.T) {
 		t.Fatalf("Expected status code %d, got %d", http.StatusNotFound, resp.Code)
 	}
 
-	// make the request with the beginParam set to secret
 	req = httptest.NewRequest(http.MethodGet, "/base?secret=1", nil)
 	resp = httptest.NewRecorder()
 	handler.ServeHTTP(resp, req)
 
 	if resp.Code != http.StatusFound {
-		t.Fatalf("Expected status code %d, got %d", http.StatusSeeOther, resp.Code)
+		t.Fatalf("Expected status code %d, got %d", http.StatusFound, resp.Code)
 	}
 
 	if got, exp := resp.Header().Get("Location"), "http://example.com/auth"; !strings.HasPrefix(got, exp) {
@@ -104,15 +109,15 @@ func TestBeginParam(t *testing.T) {
 func TestValidToken(t *testing.T) {
 	t.Parallel()
 
-	handler := InitMiddlewareAuth(
-		&mockOAuth2Connector{
-			&mockTokenSource{},
+	handler := InitMiddlewareAuth(&MiddlewareAuthConfig{
+		OAuth2Connector: &mockOAuth2Connector{
+			tokenSource: &mockTokenSource{},
 		},
-		&matchingTokenVerifier{"valid-token"},
-		"/",
-		"secret",
-		[]IDTokenValidator{allowAllTokenValidator},
-	)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		IDTokenVerifier: &matchingTokenVerifier{"valid-token"},
+		BasePath:        "/",
+		BeginParam:      "secret",
+		Validators:      []IDTokenValidator{allowAllTokenValidator},
+	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -120,7 +125,6 @@ func TestValidToken(t *testing.T) {
 	defer server.Close()
 
 	req := httptest.NewRequest(http.MethodGet, "/foobar", nil)
-
 	req.Header.Set("Cookie", "token=valid-token")
 
 	resp := httptest.NewRecorder()
@@ -134,15 +138,15 @@ func TestValidToken(t *testing.T) {
 func TestInvalidToken(t *testing.T) {
 	t.Parallel()
 
-	handler := InitMiddlewareAuth(
-		&mockOAuth2Connector{
-			&mockTokenSource{},
+	handler := InitMiddlewareAuth(&MiddlewareAuthConfig{
+		OAuth2Connector: &mockOAuth2Connector{
+			tokenSource: &mockTokenSource{},
 		},
-		&matchingTokenVerifier{"valid-token"},
-		"/",
-		"secret",
-		[]IDTokenValidator{allowAllTokenValidator},
-	)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		IDTokenVerifier: &matchingTokenVerifier{"valid-token"},
+		BasePath:        "/",
+		BeginParam:      "secret",
+		Validators:      []IDTokenValidator{allowAllTokenValidator},
+	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -150,7 +154,6 @@ func TestInvalidToken(t *testing.T) {
 	defer server.Close()
 
 	req := httptest.NewRequest(http.MethodGet, "/foobar", nil)
-
 	req.Header.Set("Cookie", "token=not-valid-token")
 
 	resp := httptest.NewRecorder()
@@ -164,15 +167,15 @@ func TestInvalidToken(t *testing.T) {
 func TestRefreshToken(t *testing.T) {
 	t.Parallel()
 
-	handler := InitMiddlewareAuth(
-		&mockOAuth2Connector{
-			&mockTokenSource{},
+	handler := InitMiddlewareAuth(&MiddlewareAuthConfig{
+		OAuth2Connector: &mockOAuth2Connector{
+			tokenSource: &mockTokenSource{},
 		},
-		&matchingTokenVerifier{"valid-token"},
-		"/",
-		"secret",
-		[]IDTokenValidator{allowAllTokenValidator},
-	)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		IDTokenVerifier: &matchingTokenVerifier{"valid-token"},
+		BasePath:        "/",
+		BeginParam:      "secret",
+		Validators:      []IDTokenValidator{allowAllTokenValidator},
+	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -180,7 +183,6 @@ func TestRefreshToken(t *testing.T) {
 	defer server.Close()
 
 	req := httptest.NewRequest(http.MethodGet, "/foobar", nil)
-
 	req.Header.Set("Cookie", "token=not-valid-token")
 	req.Header.Set("Cookie", "refresh_token=valid-token")
 
@@ -199,17 +201,17 @@ func TestRefreshToken(t *testing.T) {
 func TestExpiredTokenAndRefresh(t *testing.T) {
 	t.Parallel()
 
-	handler := InitMiddlewareAuth(
-		&mockOAuth2Connector{
-			&mockTokenSource{
+	handler := InitMiddlewareAuth(&MiddlewareAuthConfig{
+		OAuth2Connector: &mockOAuth2Connector{
+			tokenSource: &mockTokenSource{
 				returnError: "refresh expired",
 			},
 		},
-		&matchingTokenVerifier{},
-		"/base",
-		"secret",
-		[]IDTokenValidator{allowAllTokenValidator},
-	)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		IDTokenVerifier: &matchingTokenVerifier{},
+		BasePath:        "/base",
+		BeginParam:      "secret",
+		Validators:      []IDTokenValidator{allowAllTokenValidator},
+	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -224,7 +226,6 @@ func TestExpiredTokenAndRefresh(t *testing.T) {
 		t.Fatalf("Expected status code %d, got %d", http.StatusNotFound, resp.Code)
 	}
 
-	// make the request with the beginParam set to secret
 	req = httptest.NewRequest(http.MethodGet, "/base?secret=1", nil)
 	req.Header.Set("Cookie", "refresh_token=invalid-token")
 
@@ -237,5 +238,52 @@ func TestExpiredTokenAndRefresh(t *testing.T) {
 
 	if got, exp := resp.Header().Get("Location"), "http://example.com/auth"; !strings.HasPrefix(got, exp) {
 		t.Fatalf("Expected redirect location %s, got %s", exp, got)
+	}
+}
+
+func TestCallback(t *testing.T) {
+	t.Parallel()
+
+	handler := InitMiddlewareAuth(&MiddlewareAuthConfig{
+		OAuth2Connector: &mockOAuth2Connector{
+			tokenSource: &mockTokenSource{},
+		},
+		IDTokenVerifier: &matchingTokenVerifier{"valid-token"},
+		BasePath:        "",
+		BeginParam:      "secret",
+		Validators:      []IDTokenValidator{allowAllTokenValidator},
+	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	stateBs, err := json.Marshal(state{
+		Destination: "/",
+		Token:       "foo",
+	})
+	if err != nil {
+		t.Fatalf("Failed to marshal state: %v", err)
+	}
+
+	stateParam := base64.RawURLEncoding.EncodeToString(stateBs)
+
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/auth/callback?state=%s&code=1234", stateParam), nil)
+	req.Header.Set("Cookie", "state_token="+base64.RawURLEncoding.EncodeToString([]byte("foo")))
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+
+	if exp, got := 302, resp.Code; exp != got {
+		t.Fatalf("Expected status code %d, got %d", exp, got)
+	}
+
+	if resp.Header().Get("Location") != "/" {
+		t.Fatalf("Expected redirect to /base, got %s", resp.Header().Get("Location"))
+	}
+
+	if resp.Header().Get("Set-Cookie") == "" {
+		t.Fatalf("Expected a cookie to be set, got none")
 	}
 }

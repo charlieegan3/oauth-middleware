@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -38,21 +39,32 @@ func validateIDToken(token *oidc.IDToken, validators ...IDTokenValidator) bool {
 	return true
 }
 
+type MiddlewareAuthConfig struct {
+	OAuth2Connector OAuth2Connector
+	IDTokenVerifier IDTokenVerifier
+	Validators      []IDTokenValidator
+
+	BasePath   string
+	BeginParam string
+}
+
 func InitMiddlewareAuth(
-	oauth2Connector OAuth2Connector,
-	idTokenVerifier IDTokenVerifier,
-	basePath, beginParam string,
-	validators []IDTokenValidator,
+	cfg *MiddlewareAuthConfig,
 ) func(http.Handler) http.Handler {
+	basePath := cfg.BasePath
+	if basePath == "" {
+		basePath = "/"
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == basePath+"auth/callback" {
-				handleAuthCallback(w, r, oauth2Connector, idTokenVerifier, basePath, validators)
+			if r.URL.Path == filepath.Join(basePath, "auth/callback") {
+				handleAuthCallback(w, r, cfg.OAuth2Connector, cfg.IDTokenVerifier, basePath, cfg.Validators)
 
 				return
 			}
 
-			if handleToken(w, r, oauth2Connector, basePath, beginParam, idTokenVerifier, validators) {
+			if handleToken(w, r, cfg.OAuth2Connector, basePath, cfg.BeginParam, cfg.IDTokenVerifier, cfg.Validators) {
 				next.ServeHTTP(w, r)
 			}
 		})
@@ -143,7 +155,7 @@ func generateStateToken() (string, error) {
 		return "", fmt.Errorf("failed to generate state token: %w", err)
 	}
 
-	return base64.URLEncoding.EncodeToString(b), nil
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 func setCookie(w http.ResponseWriter, name, value, path string, expiry time.Time) {
@@ -184,13 +196,15 @@ func handleAuthCallback(
 	basePath string,
 	validators []IDTokenValidator,
 ) {
-	if r.URL.Query().Get("state") == "" {
+	rawState := r.URL.Query().Get("state")
+
+	if rawState == "" {
 		w.WriteHeader(http.StatusNotFound)
 
 		return
 	}
 
-	stateBs, err := base64.RawURLEncoding.DecodeString(r.URL.Query().Get("state"))
+	stateBs, err := base64.RawURLEncoding.DecodeString(rawState)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
