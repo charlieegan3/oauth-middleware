@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/coreos/go-oidc"
@@ -57,7 +58,11 @@ func main() {
 
 	serverHost := "localhost:3000"
 
-	oauth2Config.RedirectURL = fmt.Sprintf("http://%s/%s/auth/callback", serverHost, c.BasePath)
+	oauth2Config.RedirectURL = fmt.Sprintf(
+		"http://%s/%s/auth/callback",
+		serverHost,
+		strings.TrimPrefix(c.BasePath, "/"),
+	)
 	oauth2Config.Scopes = c.Scopes
 
 	tokenVerifier := oidcProvider.Verifier(&oidc.Config{ClientID: oauth2Config.ClientID})
