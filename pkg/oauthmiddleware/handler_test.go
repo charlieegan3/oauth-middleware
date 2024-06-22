@@ -67,22 +67,33 @@ func (v *matchingTokenVerifier) Verify(_ context.Context, token string) (*oidc.I
 	return &oidc.IDToken{}, nil
 }
 
-func allowAllTokenValidator(_ *oidc.IDToken) bool {
-	return true
+func allowAllTokenValidator(_ *oidc.IDToken) (map[any]any, bool) {
+	return nil, true
+}
+
+func setFooTokenValidator(_ *oidc.IDToken) (map[any]any, bool) {
+	return map[any]any{
+		"foo": "bar",
+	}, true
 }
 
 func TestBeginParam(t *testing.T) {
 	t.Parallel()
 
-	handler := Init(&Config{
+	mw, err := Init(&Config{
 		OAuth2Connector: &mockOAuth2Connector{
 			tokenSource: &mockTokenSource{},
 		},
 		IDTokenVerifier: &matchingTokenVerifier{},
-		BasePath:        "/base",
+		AuthBasePath:    "/base",
 		BeginParam:      "secret",
 		Validators:      []IDTokenValidator{allowAllTokenValidator},
-	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	})
+	if err != nil {
+		t.Fatalf("Failed to initialize handler: %v", err)
+	}
+
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -113,15 +124,21 @@ func TestBeginParam(t *testing.T) {
 func TestUnsetBeginParam(t *testing.T) {
 	t.Parallel()
 
-	handler := Init(&Config{
+	mw, err := Init(&Config{
 		OAuth2Connector: &mockOAuth2Connector{
 			tokenSource: &mockTokenSource{},
 		},
 		IDTokenVerifier: &matchingTokenVerifier{},
-		BasePath:        "/base",
+		AuthBasePath:    "/base",
 		BeginParam:      "",
 		Validators:      []IDTokenValidator{allowAllTokenValidator},
-	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		Debug:           true,
+	})
+	if err != nil {
+		t.Fatalf("Failed to initialize handler: %v", err)
+	}
+
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -140,15 +157,35 @@ func TestUnsetBeginParam(t *testing.T) {
 func TestValidToken(t *testing.T) {
 	t.Parallel()
 
-	handler := Init(&Config{
+	mw, err := Init(&Config{
 		OAuth2Connector: &mockOAuth2Connector{
 			tokenSource: &mockTokenSource{},
 		},
 		IDTokenVerifier: &matchingTokenVerifier{"valid-token"},
-		BasePath:        "/",
+		AuthBasePath:    "/",
 		BeginParam:      "secret",
-		Validators:      []IDTokenValidator{allowAllTokenValidator},
-	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		Validators:      []IDTokenValidator{setFooTokenValidator},
+	})
+	if err != nil {
+		t.Fatalf("Failed to initialize handler: %v", err)
+	}
+
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctxVal := r.Context().Value("foo")
+
+		if ctxVal == nil {
+			t.Fatal("Expected context value to be not nil, got nil")
+		}
+
+		val, ok := ctxVal.(string)
+		if !ok {
+			t.Fatalf("Expected context value to be %s, got %s", "bar", ctxVal)
+		}
+
+		if exp, got := "bar", val; exp != got {
+			t.Fatalf("Expected context value to be %s, got %s", exp, got)
+		}
+
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -169,15 +206,20 @@ func TestValidToken(t *testing.T) {
 func TestInvalidToken(t *testing.T) {
 	t.Parallel()
 
-	handler := Init(&Config{
+	mw, err := Init(&Config{
 		OAuth2Connector: &mockOAuth2Connector{
 			tokenSource: &mockTokenSource{},
 		},
 		IDTokenVerifier: &matchingTokenVerifier{"valid-token"},
-		BasePath:        "/",
+		AuthBasePath:    "/",
 		BeginParam:      "secret",
 		Validators:      []IDTokenValidator{allowAllTokenValidator},
-	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	})
+	if err != nil {
+		t.Fatalf("Failed to initialize handler: %v", err)
+	}
+
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -198,15 +240,20 @@ func TestInvalidToken(t *testing.T) {
 func TestRefreshToken(t *testing.T) {
 	t.Parallel()
 
-	handler := Init(&Config{
+	mw, err := Init(&Config{
 		OAuth2Connector: &mockOAuth2Connector{
 			tokenSource: &mockTokenSource{},
 		},
 		IDTokenVerifier: &matchingTokenVerifier{"valid-token"},
-		BasePath:        "/",
+		AuthBasePath:    "/",
 		BeginParam:      "secret",
 		Validators:      []IDTokenValidator{allowAllTokenValidator},
-	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	})
+	if err != nil {
+		t.Fatalf("Failed to initialize handler: %v", err)
+	}
+
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -232,17 +279,22 @@ func TestRefreshToken(t *testing.T) {
 func TestExpiredTokenAndRefresh(t *testing.T) {
 	t.Parallel()
 
-	handler := Init(&Config{
+	mw, err := Init(&Config{
 		OAuth2Connector: &mockOAuth2Connector{
 			tokenSource: &mockTokenSource{
 				returnError: "refresh expired",
 			},
 		},
 		IDTokenVerifier: &matchingTokenVerifier{},
-		BasePath:        "/base",
+		AuthBasePath:    "/base",
 		BeginParam:      "secret",
 		Validators:      []IDTokenValidator{allowAllTokenValidator},
-	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	})
+	if err != nil {
+		t.Fatalf("Failed to initialize handler: %v", err)
+	}
+
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -275,15 +327,21 @@ func TestExpiredTokenAndRefresh(t *testing.T) {
 func TestCallback(t *testing.T) {
 	t.Parallel()
 
-	handler := Init(&Config{
+	mw, err := Init(&Config{
 		OAuth2Connector: &mockOAuth2Connector{
 			tokenSource: &mockTokenSource{},
 		},
-		IDTokenVerifier: &matchingTokenVerifier{"valid-token"},
-		BasePath:        "",
-		BeginParam:      "secret",
-		Validators:      []IDTokenValidator{allowAllTokenValidator},
-	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		IDTokenVerifier:  &matchingTokenVerifier{"valid-token"},
+		AuthBasePath:     "/",
+		CallbackBasePath: "/",
+		BeginParam:       "secret",
+		Validators:       []IDTokenValidator{allowAllTokenValidator},
+	})
+	if err != nil {
+		t.Fatalf("Failed to initialize handler: %v", err)
+	}
+
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -322,15 +380,20 @@ func TestCallback(t *testing.T) {
 func TestUnrelatedPath(t *testing.T) {
 	t.Parallel()
 
-	handler := Init(&Config{
+	mw, err := Init(&Config{
 		OAuth2Connector: &mockOAuth2Connector{
 			tokenSource: &mockTokenSource{},
 		},
 		IDTokenVerifier: &matchingTokenVerifier{},
-		BasePath:        "/admin",
+		AuthBasePath:    "/admin",
 		BeginParam:      "notused",
 		Validators:      []IDTokenValidator{},
-	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	})
+	if err != nil {
+		t.Fatalf("Failed to initialize handler: %v", err)
+	}
+
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 

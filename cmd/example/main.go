@@ -71,7 +71,7 @@ func main() {
 		OAuth2Connector: oauth2Config,
 		IDTokenVerifier: tokenVerifier,
 		Validators:      []oauthmiddleware.IDTokenValidator{},
-		BasePath:        c.BasePath,
+		AuthBasePath:    c.BasePath,
 		BeginParam:      c.BeginParam,
 	}
 
@@ -79,7 +79,12 @@ func main() {
 
 	mux.HandleFunc("/", echo)
 
-	mw := oauthmiddleware.Init(mwCfg)
+	mw, err := oauthmiddleware.Init(mwCfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create oauth middleware: %v\n", err)
+
+		return
+	}
 
 	srv := &http.Server{
 		Addr:              serverHost,

@@ -1,6 +1,7 @@
 package oauthmiddleware
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -13,10 +14,9 @@ import (
 	"golang.org/x/oauth2"
 )
 
-func Init(cfg *Config) func(http.Handler) http.Handler {
-	basePath := cfg.BasePath
-	if basePath == "" {
-		basePath = "/"
+func Init(cfg *Config) (func(http.Handler) http.Handler, error) {
+	if cfg.AuthBasePath == "" {
+		return nil, errors.New("auth base path is required, perhaps use /")
 	}
 
 	return func(next http.Handler) http.Handler {
@@ -25,64 +25,70 @@ func Init(cfg *Config) func(http.Handler) http.Handler {
 				log.Println("Entering oauthmiddleware with path", r.URL.Path)
 			}
 
-			if !strings.HasPrefix(r.URL.Path, basePath) {
+			if !strings.HasPrefix(r.URL.Path, cfg.AuthBasePath) {
 				next.ServeHTTP(w, r)
 
 				return
 			}
 
-			if r.URL.Path == filepath.Join(basePath, "auth/callback") {
-				handleAuthCallback(w, r, cfg.OAuth2Connector, cfg.IDTokenVerifier, basePath, cfg.Validators, cfg.Debug)
+			if r.URL.Path == filepath.Join(cfg.CallbackBasePath, "auth/callback") {
+				handleAuthCallback(w, r, cfg)
 
 				return
 			}
 
-			if handleToken(w, r, cfg.OAuth2Connector, basePath, cfg.BeginParam, cfg.IDTokenVerifier, cfg.Validators, cfg.Debug) {
+			ctxValues, validated := handleToken(w, r, cfg)
+			if validated {
+				for k, v := range ctxValues {
+					r = r.WithContext(context.WithValue(r.Context(), k, v))
+				}
+
 				next.ServeHTTP(w, r)
 			}
 		})
-	}
+	}, nil
 }
 
 func handleToken(
 	w http.ResponseWriter,
 	r *http.Request,
-	oauth2Connector OAuth2Connector,
-	basePath, beginParam string,
-	idTokenVerifier IDTokenVerifier,
-	validators []IDTokenValidator,
-	debug bool,
-) bool {
+	cfg *Config,
+) (map[any]any, bool) {
 	refreshToken, _ := r.Cookie("refresh_token")
 
-	if debug {
+	if cfg.Debug {
 		log.Println("refresh token", refreshToken)
 	}
 
 	token, err := r.Cookie("token")
 	if err != nil && errors.Is(err, http.ErrNoCookie) {
-		if handleTokenRefresh(w, r, oauth2Connector, basePath) {
-			return true
+		if handleTokenRefresh(w, r, cfg) {
+			return nil, true
 		}
 
-		if debug {
+		if cfg.Debug {
 			log.Println("no token cookies")
 		}
 
 		// magic param needed on first time only
 		if refreshToken == nil &&
-			beginParam != "" &&
-			r.URL.Query().Get(beginParam) == "" {
+			cfg.BeginParam != "" &&
+			r.URL.Query().Get(cfg.BeginParam) == "" {
 			w.WriteHeader(http.StatusNotFound)
 
-			return false
+			return nil, false
 		}
 
 		stateToken, err := generateStateToken()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 
-			return false
+			return nil, false
+		}
+
+		if cfg.Debug {
+			log.Println("state token set to", stateToken)
+			log.Println("destination", r.URL.String())
 		}
 
 		s := state{
@@ -94,55 +100,65 @@ func handleToken(
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 
-			return false
+			return nil, false
+		}
+
+		// this should not have a trailing /, but should not be ""
+		stateTokenPath := strings.TrimSuffix(cfg.AuthBasePath, "/")
+		if stateTokenPath == "" {
+			stateTokenPath = "/"
 		}
 
 		setCookie(
 			w,
 			"state_token",
 			base64.RawURLEncoding.EncodeToString([]byte(s.Token)),
-			strings.TrimSuffix(basePath, "/"),
+			stateTokenPath,
 			time.Time{},
 		)
 
-		if debug {
+		if cfg.Debug {
 			log.Println("redirecting to auth provider")
 		}
 
-		http.Redirect(w, r, oauth2Connector.AuthCodeURL(base64.RawURLEncoding.EncodeToString(stateBs)), http.StatusFound)
+		http.Redirect(w, r, cfg.OAuth2Connector.AuthCodeURL(base64.RawURLEncoding.EncodeToString(stateBs)), http.StatusFound)
 
-		return false
+		return nil, false
 	}
 
-	ok, err := checkToken(r, idTokenVerifier, token.Value, validators, debug)
+	ctxValues, ok, err := checkToken(r, cfg.IDTokenVerifier, token.Value, cfg.Validators, cfg.Debug)
 	if err != nil {
+		if cfg.Debug {
+			log.Println("failed to checkToken", err)
+		}
+
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 
-		return false
+		return nil, false
 	}
 
 	if !ok {
-		if debug {
+		if cfg.Debug {
 			log.Println("token invalid")
 		}
 
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 
-		return false
+		return nil, false
 	}
 
-	return true
+	return ctxValues, true
 }
 
 func handleAuthCallback(
 	w http.ResponseWriter,
 	r *http.Request,
-	oauth2Connector OAuth2Connector,
-	idTokenVerifier IDTokenVerifier,
-	basePath string,
-	validators []IDTokenValidator,
-	debug bool,
+	cfg *Config,
 ) {
+	if cfg.Debug {
+		log.Println("Entering handleAuthCallback")
+	}
+
 	rawState := r.URL.Query().Get("state")
 
 	if rawState == "" {
@@ -169,9 +185,14 @@ func handleAuthCallback(
 
 	stateTokenCookie, err := r.Cookie("state_token")
 	if err != nil {
-		http.Error(w, "invalid state token", http.StatusInternalServerError)
+		http.Error(w, "state token missing", http.StatusInternalServerError)
 
 		return
+	}
+
+	if cfg.Debug {
+		log.Println("state token cookie", stateTokenCookie)
+		log.Println("state token", base64.RawURLEncoding.EncodeToString([]byte(s.Token)))
 	}
 
 	if base64.RawURLEncoding.EncodeToString([]byte(s.Token)) != stateTokenCookie.Value {
@@ -180,7 +201,7 @@ func handleAuthCallback(
 		return
 	}
 
-	oauth2Token, err := oauth2Connector.Exchange(r.Context(), r.URL.Query().Get("code"))
+	oauth2Token, err := cfg.OAuth2Connector.Exchange(r.Context(), r.URL.Query().Get("code"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
@@ -194,7 +215,7 @@ func handleAuthCallback(
 		return
 	}
 
-	ok, err = checkToken(r, idTokenVerifier, rawIDToken, validators, debug)
+	_, ok, err = checkToken(r, cfg.IDTokenVerifier, rawIDToken, cfg.Validators, cfg.Debug)
 	if err != nil {
 		log.Println(err)
 
@@ -207,24 +228,24 @@ func handleAuthCallback(
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	}
 
-	setCookie(w, "token", rawIDToken, strings.TrimSuffix(basePath, "/"), oauth2Token.Expiry)
+	setCookie(w, "token", rawIDToken, cfg.CookiePath(), oauth2Token.Expiry)
 
 	if oauth2Token.RefreshToken != "" {
 		setCookie(
 			w,
 			"refresh_token",
 			oauth2Token.RefreshToken,
-			strings.TrimSuffix(basePath, "/"),
+			cfg.CookiePath(),
 			time.Now().Add(14*24*time.Hour),
 		)
 	}
 
-	setCookie(w, "state_token", "", strings.TrimSuffix(basePath, "/"), time.Unix(0, 0))
+	setCookie(w, "state_token", "", cfg.CookiePath(), time.Unix(0, 0))
 
 	http.Redirect(w, r, s.Destination, http.StatusFound)
 }
 
-func handleTokenRefresh(w http.ResponseWriter, r *http.Request, oauth2Connector OAuth2Connector, basePath string) bool {
+func handleTokenRefresh(w http.ResponseWriter, r *http.Request, cfg *Config) bool {
 	refreshToken, err := r.Cookie("refresh_token")
 	if err != nil {
 		return false
@@ -232,19 +253,19 @@ func handleTokenRefresh(w http.ResponseWriter, r *http.Request, oauth2Connector 
 
 	oauth2Token := &oauth2.Token{RefreshToken: refreshToken.Value}
 
-	newToken, err := oauth2Connector.TokenSource(r.Context(), oauth2Token).Token()
+	newToken, err := cfg.OAuth2Connector.TokenSource(r.Context(), oauth2Token).Token()
 	if err != nil {
 		return false
 	}
 
-	setCookie(w, "token", newToken.AccessToken, strings.TrimSuffix(basePath, "/"), newToken.Expiry)
+	setCookie(w, "token", newToken.AccessToken, strings.TrimSuffix(cfg.AuthBasePath, "/"), newToken.Expiry)
 
 	if newToken.RefreshToken != "" {
 		setCookie(
 			w,
 			"refresh_token",
 			newToken.RefreshToken,
-			strings.TrimSuffix(basePath, "/"),
+			cfg.CookiePath(),
 			time.Now().Add(14*24*time.Hour),
 		)
 	}

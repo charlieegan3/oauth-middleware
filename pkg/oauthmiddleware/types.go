@@ -17,15 +17,25 @@ type IDTokenVerifier interface {
 	Verify(ctx context.Context, rawIDToken string) (*oidc.IDToken, error)
 }
 
-type IDTokenValidator func(token *oidc.IDToken) bool
+type IDTokenValidator func(token *oidc.IDToken) (map[any]any, bool)
 
 type Config struct {
 	OAuth2Connector OAuth2Connector
 	IDTokenVerifier IDTokenVerifier
 	Validators      []IDTokenValidator
 
-	BasePath   string
-	BeginParam string
+	BeginParam       string
+	AuthBasePath     string
+	CallbackBasePath string
 
 	Debug bool
+}
+
+func (c *Config) CookiePath() string {
+	path := c.AuthBasePath
+	if path == "" {
+		return "/"
+	}
+
+	return path
 }
