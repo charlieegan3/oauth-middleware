@@ -21,6 +21,10 @@ func Init(cfg *Config) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if cfg.Debug {
+				log.Println("Entering oauthmiddleware with path", r.URL.Path)
+			}
+
 			if !strings.HasPrefix(r.URL.Path, basePath) {
 				next.ServeHTTP(w, r)
 
@@ -28,12 +32,12 @@ func Init(cfg *Config) func(http.Handler) http.Handler {
 			}
 
 			if r.URL.Path == filepath.Join(basePath, "auth/callback") {
-				handleAuthCallback(w, r, cfg.OAuth2Connector, cfg.IDTokenVerifier, basePath, cfg.Validators)
+				handleAuthCallback(w, r, cfg.OAuth2Connector, cfg.IDTokenVerifier, basePath, cfg.Validators, cfg.Debug)
 
 				return
 			}
 
-			if handleToken(w, r, cfg.OAuth2Connector, basePath, cfg.BeginParam, cfg.IDTokenVerifier, cfg.Validators) {
+			if handleToken(w, r, cfg.OAuth2Connector, basePath, cfg.BeginParam, cfg.IDTokenVerifier, cfg.Validators, cfg.Debug) {
 				next.ServeHTTP(w, r)
 			}
 		})
@@ -47,13 +51,22 @@ func handleToken(
 	basePath, beginParam string,
 	idTokenVerifier IDTokenVerifier,
 	validators []IDTokenValidator,
+	debug bool,
 ) bool {
 	refreshToken, _ := r.Cookie("refresh_token")
+
+	if debug {
+		log.Println("refresh token", refreshToken)
+	}
 
 	token, err := r.Cookie("token")
 	if err != nil && errors.Is(err, http.ErrNoCookie) {
 		if handleTokenRefresh(w, r, oauth2Connector, basePath) {
 			return true
+		}
+
+		if debug {
+			log.Println("no token cookies")
 		}
 
 		// magic param needed on first time only
@@ -92,12 +105,16 @@ func handleToken(
 			time.Time{},
 		)
 
+		if debug {
+			log.Println("redirecting to auth provider")
+		}
+
 		http.Redirect(w, r, oauth2Connector.AuthCodeURL(base64.RawURLEncoding.EncodeToString(stateBs)), http.StatusFound)
 
 		return false
 	}
 
-	ok, err := checkToken(r, idTokenVerifier, token.Value, validators)
+	ok, err := checkToken(r, idTokenVerifier, token.Value, validators, debug)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 
@@ -105,6 +122,10 @@ func handleToken(
 	}
 
 	if !ok {
+		if debug {
+			log.Println("token invalid")
+		}
+
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 
 		return false
@@ -120,6 +141,7 @@ func handleAuthCallback(
 	idTokenVerifier IDTokenVerifier,
 	basePath string,
 	validators []IDTokenValidator,
+	debug bool,
 ) {
 	rawState := r.URL.Query().Get("state")
 
@@ -172,7 +194,7 @@ func handleAuthCallback(
 		return
 	}
 
-	ok, err = checkToken(r, idTokenVerifier, rawIDToken, validators)
+	ok, err = checkToken(r, idTokenVerifier, rawIDToken, validators, debug)
 	if err != nil {
 		log.Println(err)
 

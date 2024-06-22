@@ -26,4 +26,6 @@ type Config struct {
 
 	BasePath   string
 	BeginParam string
+
+	Debug bool
 }
