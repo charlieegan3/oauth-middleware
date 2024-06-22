@@ -110,6 +110,33 @@ func TestBeginParam(t *testing.T) {
 	}
 }
 
+func TestUnsetBeginParam(t *testing.T) {
+	t.Parallel()
+
+	handler := Init(&Config{
+		OAuth2Connector: &mockOAuth2Connector{
+			tokenSource: &mockTokenSource{},
+		},
+		IDTokenVerifier: &matchingTokenVerifier{},
+		BasePath:        "/base",
+		BeginParam:      "",
+		Validators:      []IDTokenValidator{allowAllTokenValidator},
+	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/base", nil)
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+
+	if exp, got := http.StatusFound, resp.Code; exp != got {
+		t.Fatalf("Expected status code %d, got %d", exp, got)
+	}
+}
+
 func TestValidToken(t *testing.T) {
 	t.Parallel()
 

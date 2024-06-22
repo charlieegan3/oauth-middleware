@@ -57,7 +57,9 @@ func handleToken(
 		}
 
 		// magic param needed on first time only
-		if refreshToken == nil && r.URL.Query().Get(beginParam) == "" {
+		if refreshToken == nil &&
+			beginParam != "" &&
+			r.URL.Query().Get(beginParam) == "" {
 			w.WriteHeader(http.StatusNotFound)
 
 			return false
