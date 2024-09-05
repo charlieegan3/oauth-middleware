@@ -349,7 +349,7 @@ func TestCallback(t *testing.T) {
 	defer server.Close()
 
 	stateBs, err := json.Marshal(state{
-		Destination: "/",
+		Destination: "https://example.com/",
 		Token:       "foo",
 	})
 	if err != nil {
@@ -368,8 +368,8 @@ func TestCallback(t *testing.T) {
 		t.Fatalf("Expected status code %d, got %d", exp, got)
 	}
 
-	if resp.Header().Get("Location") != "/" {
-		t.Fatalf("Expected redirect to /base, got %s", resp.Header().Get("Location"))
+	if exp, got := "https://example.com/", resp.Header().Get("Location"); exp != got {
+		t.Fatalf("Expected redirect location %s, got %s", exp, got)
 	}
 
 	if resp.Header().Get("Set-Cookie") == "" {

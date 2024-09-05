@@ -86,14 +86,19 @@ func handleToken(
 			return nil, false
 		}
 
-		if cfg.Debug {
-			log.Println("state token set to", stateToken)
-			log.Println("destination", r.URL.String())
-		}
+		desURL := r.URL
+		desURL.Host = r.Host
+		desURL.Scheme = "https"
 
 		s := state{
-			Destination: r.URL.String(),
+			Destination: desURL.String(),
 			Token:       stateToken,
+		}
+
+		if cfg.Debug {
+			log.Println("state token set to", s.Token)
+
+			log.Println("destination", s.Destination)
 		}
 
 		stateBs, err := json.Marshal(s)
