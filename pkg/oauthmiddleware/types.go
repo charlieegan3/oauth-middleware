@@ -24,8 +24,10 @@ type Config struct {
 	IDTokenVerifier IDTokenVerifier
 	Validators      []IDTokenValidator
 
-	BeginParam       string
-	AuthBasePath     string
+	BeginParam   string
+	AuthBasePath string
+	// CallbackPath, if set, takes precedence over CallbackBasePath+/auth/callback
+	CallbackPath     string
 	CallbackBasePath string
 	Domain           string
 

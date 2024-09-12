@@ -31,7 +31,8 @@ func Init(cfg *Config) (func(http.Handler) http.Handler, error) {
 				return
 			}
 
-			if r.URL.Path == filepath.Join(cfg.CallbackBasePath, "auth/callback") {
+			if r.URL.Path == filepath.Join(cfg.CallbackPath) ||
+				r.URL.Path == filepath.Join(cfg.CallbackBasePath, "auth/callback") {
 				handleAuthCallback(w, r, cfg)
 
 				return
@@ -57,7 +58,7 @@ func handleToken(
 	refreshToken, _ := r.Cookie("refresh_token")
 
 	if cfg.Debug {
-		log.Println("refresh token", refreshToken)
+		log.Printf("refresh token: %q\n", refreshToken)
 	}
 
 	token, err := r.Cookie("token")
