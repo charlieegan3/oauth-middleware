@@ -118,6 +118,7 @@ func handleToken(
 			w,
 			"state_token",
 			base64.RawURLEncoding.EncodeToString([]byte(s.Token)),
+			cfg.Domain,
 			stateTokenPath,
 			time.Time{},
 		)
@@ -233,19 +234,20 @@ func handleAuthCallback(
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	}
 
-	setCookie(w, "token", rawIDToken, cfg.CookiePath(), oauth2Token.Expiry)
+	setCookie(w, "token", rawIDToken, cfg.Domain, cfg.CookiePath(), oauth2Token.Expiry)
 
 	if oauth2Token.RefreshToken != "" {
 		setCookie(
 			w,
 			"refresh_token",
 			oauth2Token.RefreshToken,
+			cfg.Domain,
 			cfg.CookiePath(),
 			time.Now().Add(14*24*time.Hour),
 		)
 	}
 
-	setCookie(w, "state_token", "", cfg.CookiePath(), time.Unix(0, 0))
+	setCookie(w, "state_token", "", cfg.Domain, cfg.CookiePath(), time.Unix(0, 0))
 
 	http.Redirect(w, r, s.Destination, http.StatusFound)
 }
@@ -263,13 +265,21 @@ func handleTokenRefresh(w http.ResponseWriter, r *http.Request, cfg *Config) boo
 		return false
 	}
 
-	setCookie(w, "token", newToken.AccessToken, strings.TrimSuffix(cfg.AuthBasePath, "/"), newToken.Expiry)
+	setCookie(
+		w,
+		"token",
+		newToken.AccessToken,
+		cfg.Domain,
+		strings.TrimSuffix(cfg.AuthBasePath, "/"),
+		newToken.Expiry,
+	)
 
 	if newToken.RefreshToken != "" {
 		setCookie(
 			w,
 			"refresh_token",
 			newToken.RefreshToken,
+			cfg.Domain,
 			cfg.CookiePath(),
 			time.Now().Add(14*24*time.Hour),
 		)

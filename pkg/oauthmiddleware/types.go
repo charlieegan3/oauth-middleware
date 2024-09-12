@@ -27,6 +27,7 @@ type Config struct {
 	BeginParam       string
 	AuthBasePath     string
 	CallbackBasePath string
+	Domain           string
 
 	Debug bool
 }
