@@ -224,7 +224,9 @@ func handleAuthCallback(
 
 	_, ok, err = checkToken(r, cfg.IDTokenVerifier, rawIDToken, cfg.Validators, cfg.Debug)
 	if err != nil {
-		log.Println(err)
+		if cfg.Debug {
+			log.Println("failed to checkToken", err)
+		}
 
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 
@@ -232,7 +234,13 @@ func handleAuthCallback(
 	}
 
 	if !ok {
+		if cfg.Debug {
+			log.Println("rejected token")
+		}
+
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+
+		return
 	}
 
 	setCookie(w, "token", rawIDToken, cfg.Domain, cfg.CookiePath(), oauth2Token.Expiry)
